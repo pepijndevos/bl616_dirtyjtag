@@ -13,6 +13,10 @@
 #include "jtag_gpio.h"
 #include "uart_bridge.h"
 #include "usb_eps.h"
+#if defined(BL702)
+#include "bflb_flash.h"
+#include "bl702_glb.h"
+#endif
 
 /* DirtyJTAG v2 command IDs */
 enum {
@@ -24,6 +28,7 @@ enum {
     CMD_GETSIG = 0x05,
     CMD_CLK    = 0x06,
     CMD_REGS   = 0x0E,  /* debug: raw register dump, not DirtyJTAG */
+    CMD_ROMBOOT = 0x0F, /* + "BOOT": erase boot header and reset, not DirtyJTAG */
 };
 
 /* Command modifiers */
@@ -157,6 +162,16 @@ static void cmd_handle(const uint8_t *rxbuf, uint32_t count)
             output_buffer += 4;
             break;
         }
+
+        case CMD_ROMBOOT:
+            /* Experiment: with no valid boot header the ROM should fall back
+             * to its download mode, so reflashing needs no Boot_Strap bridge. */
+            if (commands + 5 <= rxbuf + count && memcmp(commands + 1, "BOOT", 4) == 0) {
+                bflb_flash_erase(0, 4096);
+                GLB_SW_System_Reset();
+            }
+            commands += 4;
+            break;
 #endif
 
         default:
