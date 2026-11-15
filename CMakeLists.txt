@@ -19,6 +19,15 @@ target_sources(app PRIVATE
     src/uart_bridge.c
 )
 
+if(CHIP STREQUAL "bl702")
+# Build the BL702 USB device driver from src/ instead of the SDK copy, so
+# fixes to it live in this repository.
+get_target_property(lhal_sources liblhal SOURCES)
+list(FILTER lhal_sources EXCLUDE REGEX "/bflb_usb_v1\\.c$")
+set_property(TARGET liblhal PROPERTY SOURCES ${lhal_sources})
+target_sources(app PRIVATE src/bflb_usb_v1.c)
+endif()
+
 sdk_set_main_file(src/main.c)
 
 project(bl616_dirtyjtag)
