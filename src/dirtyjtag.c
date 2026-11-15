@@ -23,6 +23,7 @@ enum {
     CMD_SETSIG = 0x04,
     CMD_GETSIG = 0x05,
     CMD_CLK    = 0x06,
+    CMD_REGS   = 0x0E,  /* debug: raw register dump, not DirtyJTAG */
 };
 
 /* Command modifiers */
@@ -132,6 +133,31 @@ static void cmd_handle(const uint8_t *rxbuf, uint32_t count)
             commands += 2;
             break;
         }
+
+#if defined(BL702)
+        case CMD_REGS: {
+            /* 12 raw words + edge count on GPIO27 (FPGA_TX) */
+            static const uint32_t regs[] = {
+                0x40000088, 0x400000c0, 0x40000134, 0x40000144, 0x40000148,
+                0x40000180, 0x40000188, 0x40000190,
+                0x4000A100, 0x4000A104, 0x4000A120, 0x4000A184,
+            };
+            for (unsigned i = 0; i < sizeof(regs) / sizeof(regs[0]); i++) {
+                uint32_t v = *(volatile uint32_t *)regs[i];
+                memcpy(output_buffer, &v, 4);
+                output_buffer += 4;
+            }
+            uint32_t edges = 0, last = *(volatile uint32_t *)0x40000180 & (1u << 27);
+            for (int i = 0; i < 200000; i++) {
+                uint32_t now = *(volatile uint32_t *)0x40000180 & (1u << 27);
+                edges += (now != last);
+                last = now;
+            }
+            memcpy(output_buffer, &edges, 4);
+            output_buffer += 4;
+            break;
+        }
+#endif
 
         default:
             goto done;
