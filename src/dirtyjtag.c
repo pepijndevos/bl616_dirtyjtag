@@ -13,10 +13,6 @@
 #include "jtag_gpio.h"
 #include "uart_bridge.h"
 #include "usb_eps.h"
-#if defined(BL702)
-#include "bflb_flash.h"
-#include "bl702_glb.h"
-#endif
 
 /* DirtyJTAG v2 command IDs */
 enum {
@@ -28,7 +24,6 @@ enum {
     CMD_GETSIG = 0x05,
     CMD_CLK    = 0x06,
     CMD_REGS   = 0x0E,  /* debug: raw register dump, not DirtyJTAG */
-    CMD_ROMBOOT = 0x0F, /* + "BOOT": erase boot header and reset, not DirtyJTAG */
 };
 
 /* Command modifiers */
@@ -141,37 +136,29 @@ static void cmd_handle(const uint8_t *rxbuf, uint32_t count)
 
 #if defined(BL702)
         case CMD_REGS: {
-            /* 12 raw words + edge count on GPIO27 (FPGA_TX) */
-            static const uint32_t regs[] = {
-                0x40000088, 0x400000c0, 0x40000134, 0x40000144, 0x40000148,
-                0x40000180, 0x40000188, 0x40000190,
-                0x4000A100, 0x4000A104, 0x4000A120, 0x4000A184,
-            };
+            /* GPIO_IN hi (pad 27 reads as GPIO36 when remapped), UART1 int
+             * status and FIFO counts, edges on GPIO36, then uart task state */
+            static const uint32_t regs[] = { 0x40000184, 0x4000A120, 0x4000A184 };
             for (unsigned i = 0; i < sizeof(regs) / sizeof(regs[0]); i++) {
                 uint32_t v = *(volatile uint32_t *)regs[i];
                 memcpy(output_buffer, &v, 4);
                 output_buffer += 4;
             }
-            uint32_t edges = 0, last = *(volatile uint32_t *)0x40000180 & (1u << 27);
+            uint32_t edges = 0, last = *(volatile uint32_t *)0x40000184 & (1u << 4);
             for (int i = 0; i < 200000; i++) {
-                uint32_t now = *(volatile uint32_t *)0x40000180 & (1u << 27);
+                uint32_t now = *(volatile uint32_t *)0x40000184 & (1u << 4);
                 edges += (now != last);
                 last = now;
             }
             memcpy(output_buffer, &edges, 4);
             output_buffer += 4;
+            uint32_t task[5];
+            uart_bridge_get_task_debug(task);
+            memcpy(output_buffer, task, sizeof(task));
+            output_buffer += sizeof(task);
             break;
         }
 
-        case CMD_ROMBOOT:
-            /* Experiment: with no valid boot header the ROM should fall back
-             * to its download mode, so reflashing needs no Boot_Strap bridge. */
-            if (commands + 5 <= rxbuf + count && memcmp(commands + 1, "BOOT", 4) == 0) {
-                bflb_flash_erase(0, 4096);
-                GLB_SW_System_Reset();
-            }
-            commands += 4;
-            break;
 #endif
 
         default:

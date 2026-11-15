@@ -17,5 +17,6 @@ struct uart_debug_state {
     uint32_t baudrate;
 };
 void uart_bridge_get_debug(struct uart_debug_state *state);
+void uart_bridge_get_task_debug(uint32_t out[5]);
 
 #endif

@@ -38,6 +38,8 @@ static volatile bool cdc_tx_busy;
 static uint32_t debug_rx_bytes;
 static uint32_t debug_tx_bytes;
 static uint32_t debug_baudrate = 115200;
+static volatile uint32_t debug_loops;
+static TaskHandle_t uart_task_handle;
 
 /* Deferred UART reconfiguration (set in ISR, applied in task) */
 static volatile bool uart_reconfig_pending;
@@ -179,8 +181,10 @@ void uart_bridge_start(void)
 void uart_task(void *param)
 {
     (void)param;
+    uart_task_handle = xTaskGetCurrentTaskHandle();
 
     for (;;) {
+        debug_loops++;
         if (uart1_dev == NULL) {
             vTaskDelay(1);
             continue;
@@ -207,10 +211,21 @@ void uart_task(void *param)
             usbd_ep_start_write(0, CDC_IN_EP, cdc_tx_buf[tx_fill_idx], tx_fill_count);
             tx_fill_idx ^= 1;
             tx_fill_count = 0;
-        } else if (tx_fill_count == 0) {
+        } else {
+            /* Nothing to send yet, or USB still busy: don't spin */
             vTaskDelay(1);
         }
     }
+}
+
+/* tick count, task loop count, fill level, task state, tx busy */
+void uart_bridge_get_task_debug(uint32_t out[5])
+{
+    out[0] = xTaskGetTickCountFromISR();
+    out[1] = debug_loops;
+    out[2] = tx_fill_count;
+    out[3] = uart_task_handle ? (uint32_t)eTaskGetState(uart_task_handle) : 0xff;
+    out[4] = cdc_tx_busy;
 }
 
 void uart_bridge_get_debug(struct uart_debug_state *state)
