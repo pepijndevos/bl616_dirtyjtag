@@ -493,6 +493,26 @@ void USBD_IRQHandler(uint8_t busid)
     uint16_t tx_count;
 
     intstatus = bflb_usb_get_intstatus();
+
+    /*
+     * An endpoint's DONE can be visible while the controller still holds
+     * the endpoint RDY, i.e. before the transaction has finished.  Only
+     * acknowledge DONE once RDY has dropped (as bl_mcu_sdk's usb_dc_isr
+     * does); otherwise leave it latched, and the still-asserted interrupt
+     * brings us back here.  Clearing DONE first and then busy-waiting for
+     * RDY, as this driver used to, lets the same transaction latch DONE
+     * again during the wait; that stale DONE is then taken for the next
+     * packet, the driver stays one DONE ahead from then on, and after the
+     * last OUT packet the ISR spins on the re-armed endpoint until the host
+     * happens to send another one, starving every task meanwhile.
+     * While RDY is free the endpoint is not armed, so nothing can complete
+     * on it between this check and the clear below.
+     */
+    for (uint8_t ep_idx = 1; ep_idx < USB_NUM_BIDIR_ENDPOINTS; ep_idx++) {
+        if ((intstatus & (1 << (9 + 2 * ep_idx))) && bflb_usb_ep_isbusy(ep_idx)) {
+            intstatus &= ~(1 << (9 + 2 * ep_idx));
+        }
+    }
     bflb_usb_int_clear(intstatus);
 
     for (uint8_t ep_idx = 1; ep_idx < USB_NUM_BIDIR_ENDPOINTS; ep_idx++) {
@@ -511,9 +531,6 @@ void USBD_IRQHandler(uint8_t busid)
                     bflb_usb_ep_set_ready(ep_idx);
                 }
             } else {
-                while (bflb_usb_ep_isbusy(ep_idx)) {
-                }
-
                 rx_count = bflb_usb_get_rxcount(ep_idx);
                 bflb_usb_fifo2mem(ep_idx, g_bl_udc.out_ep[ep_idx].xfer_buf, rx_count);
 
