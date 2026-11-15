@@ -12,8 +12,11 @@
 #define JTAG_TDI_PIN GPIO_PIN_0
 #define JTAG_TDO_PIN GPIO_PIN_1
 
-/* CDC-ACM UART bridge — UART1 */
-#define UART1_TX_PIN GPIO_PIN_24
-#define UART1_RX_PIN GPIO_PIN_25
+/* CDC-ACM UART bridge — UART1 (Tang Primer 20K Dock)
+ *
+ * FPGA_TX = M11 -> BL702 UART1_RX,
+ * FPGA_RX = T13 <- BL702 UART1_TX. */
+#define UART1_TX_PIN GPIO_PIN_26
+#define UART1_RX_PIN GPIO_PIN_27
 
 #endif
