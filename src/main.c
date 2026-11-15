@@ -5,6 +5,9 @@
  */
 #include "board.h"
 #include "bflb_gpio.h"
+#if defined(BL702)
+#include "bl702_glb.h"
+#endif
 #include "usbd_core.h"
 #include "FreeRTOS.h"
 #include "task.h"
@@ -40,6 +43,11 @@ static void usbd_event_handler(uint8_t busid, uint8_t event)
 
 int main(void)
 {
+#if defined(BL702)
+    /* Free the SF2 pads GPIO23..28 (TCK, UART1) from the flash interface,
+     * as Sipeed's stock 9K firmware does first thing in main. */
+    GLB_Select_Internal_Flash();
+#endif
     board_init();
 
     /* Init USB composite device */
