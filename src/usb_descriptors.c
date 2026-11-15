@@ -7,6 +7,7 @@
 #include "usbd_core.h"
 #include "usbd_cdc_acm.h"
 #include "usb_eps.h"
+#include "bflb_efuse.h"
 
 #define USBD_VID           0x1209
 #define USBD_PID           0xC0CA
@@ -50,12 +51,28 @@ static const uint8_t other_speed_config_descriptor[] = {
     CDC_ACM_DESCRIPTOR_INIT(0x01, CDC_INT_EP, CDC_OUT_EP, CDC_IN_EP, 0x0040, 0x00),
 };
 
+/* The chip's factory MAC from efuse: unique per board, so every board gets
+ * its own /dev/serial/by-id name. Filled in at init. */
+static char serial[13];
+
 static const char *string_descriptors[] = {
     (const char[]){ 0x09, 0x04 },  /* Langid */
     "DirtyJTAG",                    /* Manufacturer */
     "DirtyJTAG",                    /* Product */
-    "0200",                         /* Serial Number */
+    serial,                         /* Serial Number */
 };
+
+static void serial_init(void)
+{
+    static const char hex[] = "0123456789abcdef";
+    uint8_t mac[8];
+
+    bflb_efuse_get_chipid(mac);
+    for (int i = 0; i < 6; i++) {
+        serial[2 * i] = hex[mac[i] >> 4];
+        serial[2 * i + 1] = hex[mac[i] & 0xf];
+    }
+}
 
 static const uint8_t *device_descriptor_callback(uint8_t speed)
 {
@@ -100,5 +117,6 @@ const struct usb_descriptor dirtyjtag_descriptor = {
 
 void usb_descriptors_init(uint8_t busid)
 {
+    serial_init();
     usbd_desc_register(busid, &dirtyjtag_descriptor);
 }

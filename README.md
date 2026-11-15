@@ -103,6 +103,9 @@ export PATH=$(pwd)/bouffalo_sdk/tools/toolchain_gcc_t-head_linux/bin:$PATH
 make CHIP=bl702 BOARD=bl702dk
 ```
 
+The USB serial number is the chip's factory MAC (e.g. `54f5634cb97c`), so every board
+gets its own `/dev/serial/by-id/` name.
+
 Flash: hold **Boot_Strap (GPIO28) high** while plugging in USB to enter the BL702 ROM download mode, then:
 
 ```bash
