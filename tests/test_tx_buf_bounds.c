@@ -1,13 +1,9 @@
 /*
- * Regression test: cmd_handle() must not write past its 64-byte tx_buf.
+ * Regression test: command responses must not overrun the 64-byte tx_buf.
  *
- * Three CMD_INFO commands in one packet produce 26 bytes each (10-byte info
- * string + 16-byte debug state) = 78 bytes, but tx_buf is only 64 bytes and
- * the handler has no output bounds check, so it overruns into the adjacent
- * static (ep_tx_busy).
- *
- * A separate binary because AddressSanitizer aborts the process on the
- * overrun, which would mask the other tests' results.
+ * A packet may contain multiple commands. Seven CMD_INFO commands produce
+ * seven 10-byte responses (70 bytes total), which must not overrun the
+ * one-packet response buffer.
  */
 #include "fakes.h"
 
@@ -20,6 +16,8 @@
 #define TX_BUF_SIZE 64
 
 static void run_tests(void) {
+  uint8_t pkt[TX_BUF_SIZE] = {0};
+
   fakes_reset();
   dirtyjtag_init(0);
   dirtyjtag_start();
@@ -29,18 +27,17 @@ static void run_tests(void) {
   if (!rx)
     return;
 
-  memset(rx, 0x00, TX_BUF_SIZE);
-  rx[0] = CMD_INFO;
-  rx[1] = CMD_INFO;
-  rx[2] = CMD_INFO;
-  rx[3] = CMD_STOP;
+  for (size_t i = 0; i < 7; i++)
+    pkt[i] = CMD_INFO;
+  pkt[7] = CMD_STOP;
+  memcpy(rx, pkt, sizeof(pkt));
 
   struct usbd_endpoint *ep = fake_find_ep(0x01);
   CHECK(ep != 0);
   if (ep)
-    ep->ep_cb(0, 0x01, 4);
+    ep->ep_cb(0, 0x01, 8);
 
-  /* 3 * (10 + sizeof(debug state)) must fit in tx_buf */
+  /* Only complete responses may be returned; none may overrun tx_buf. */
   CHECK(fake_write_len <= TX_BUF_SIZE);
 }
 

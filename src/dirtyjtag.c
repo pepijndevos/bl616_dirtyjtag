@@ -13,6 +13,9 @@
 #include "uart_bridge.h"
 #include "usbd_core.h"
 
+/* Each OUT packet produces at most one IN packet. A command is not executed
+ * unless its operands fit in the OUT packet and its response fits in tx_buf. */
+
 #define JTAG_OUT_EP 0x01
 #define JTAG_IN_EP 0x82
 
@@ -25,6 +28,8 @@ enum {
   CMD_SETSIG = 0x04,
   CMD_GETSIG = 0x05,
   CMD_CLK = 0x06,
+  /* Project-specific diagnostics, not part of the DirtyJTAG protocol */
+  CMD_UART_DEBUG = 0x07,
 };
 
 /* Command modifiers */
@@ -48,16 +53,6 @@ static USB_NOCACHE_RAM_SECTION USB_MEM_ALIGNX uint8_t rx_buf[64];
 static USB_NOCACHE_RAM_SECTION USB_MEM_ALIGNX uint8_t tx_buf[64];
 static volatile bool ep_tx_busy;
 
-/* Free space left in tx_buf from `out` onwards. */
-static inline size_t out_avail(const uint8_t *out) {
-  return sizeof(tx_buf) - (size_t)(out - tx_buf);
-}
-
-/* Bytes of the received packet still unread from `cmd` onwards. */
-static inline uint32_t in_avail(const uint8_t *cmd, const uint8_t *end) {
-  return (uint32_t)(end - cmd);
-}
-
 static void cmd_handle(const uint8_t *rxbuf, uint32_t count) {
   const uint8_t *commands = rxbuf;
   const uint8_t *end = rxbuf + count;
@@ -66,31 +61,23 @@ static void cmd_handle(const uint8_t *rxbuf, uint32_t count) {
   while ((commands < end) && (*commands != CMD_STOP)) {
     switch ((*commands) & 0x0F) {
       case CMD_INFO: {
-        char info_string[10] = "DJTAG2\n";
-        /* Standard info string followed by the debug state */
-        struct uart_debug_state dbg;
-        uart_bridge_get_debug(&dbg);
-
-        size_t needed = sizeof(info_string) + sizeof(dbg);
-        if (out_avail(output_buffer) < needed)
+        static const char info_string[10] = "DJTAG2\n";
+        if (output_buffer + sizeof(info_string) > tx_buf + sizeof(tx_buf))
           goto done;
-
         memcpy(output_buffer, info_string, sizeof(info_string));
         output_buffer += sizeof(info_string);
-        memcpy(output_buffer, &dbg, sizeof(dbg));
-        output_buffer += sizeof(dbg);
         break;
       }
 
       case CMD_FREQ:
-        if (in_avail(commands, end) < 3)
+        if (commands + 3 > end)
           goto done;
         jtag_set_frequency((commands[1] << 8) | commands[2]);
         commands += 2;
         break;
 
       case CMD_XFER: {
-        if (in_avail(commands, end) < 2)
+        if (commands + 2 > end)
           goto done;
 
         bool no_read = *commands & NO_READ;
@@ -103,10 +90,9 @@ static void cmd_handle(const uint8_t *rxbuf, uint32_t count) {
 
         uint16_t trbytes = (transferred_bits + 7) / 8;
 
-        /* Reject a command whose payload was truncated by the endpoint */
-        if (in_avail(commands, end) < (uint32_t)2 + trbytes)
+        if (commands + 2 + trbytes > end)
           goto done;
-        if (!no_read && out_avail(output_buffer) < trbytes)
+        if (!no_read && output_buffer + trbytes > tx_buf + sizeof(tx_buf))
           goto done;
 
         if (!no_read)
@@ -120,7 +106,7 @@ static void cmd_handle(const uint8_t *rxbuf, uint32_t count) {
       }
 
       case CMD_SETSIG: {
-        if (in_avail(commands, end) < 3)
+        if (commands + 3 > end)
           goto done;
 
         uint8_t signal_mask = commands[1];
@@ -141,7 +127,7 @@ static void cmd_handle(const uint8_t *rxbuf, uint32_t count) {
       }
 
       case CMD_GETSIG: {
-        if (out_avail(output_buffer) < 1)
+        if (output_buffer >= tx_buf + sizeof(tx_buf))
           goto done;
 
         uint8_t signal_status = 0;
@@ -153,14 +139,14 @@ static void cmd_handle(const uint8_t *rxbuf, uint32_t count) {
       }
 
       case CMD_CLK: {
-        if (in_avail(commands, end) < 3)
+        if (commands + 3 > end)
           goto done;
 
         bool readout = !!(*commands & READOUT);
         uint8_t signals = commands[1];
         uint8_t clk_pulses = commands[2];
 
-        if (readout && out_avail(output_buffer) < 1)
+        if (readout && output_buffer >= tx_buf + sizeof(tx_buf))
           goto done;
 
         bool readout_val = jtag_strobe(clk_pulses, signals & SIG_TMS, signals & SIG_TDI);
@@ -169,6 +155,33 @@ static void cmd_handle(const uint8_t *rxbuf, uint32_t count) {
           output_buffer += 1;
         }
         commands += 2;
+        break;
+      }
+
+      case CMD_UART_DEBUG: {
+        struct uart_debug_state dbg;
+        uint8_t *out = output_buffer;
+
+        if (output_buffer + 14 > tx_buf + sizeof(tx_buf))
+          goto done;
+
+        uart_bridge_get_debug(&dbg);
+        /* Explicit little-endian wire format, independent of struct layout */
+        out[0] = dbg.rx_bytes;
+        out[1] = dbg.rx_bytes >> 8;
+        out[2] = dbg.rx_bytes >> 16;
+        out[3] = dbg.rx_bytes >> 24;
+        out[4] = dbg.tx_bytes;
+        out[5] = dbg.tx_bytes >> 8;
+        out[6] = dbg.tx_bytes >> 16;
+        out[7] = dbg.tx_bytes >> 24;
+        out[8] = dbg.cdc_configured;
+        out[9] = dbg.cdc_tx_busy;
+        out[10] = dbg.baudrate;
+        out[11] = dbg.baudrate >> 8;
+        out[12] = dbg.baudrate >> 16;
+        out[13] = dbg.baudrate >> 24;
+        output_buffer += 14;
         break;
       }
 

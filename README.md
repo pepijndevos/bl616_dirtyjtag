@@ -90,10 +90,13 @@ the DirtyJTAG command parser, its response buffers, and the USB descriptor
 tables. The build uses AddressSanitizer, so buffer overruns in the firmware
 fail the run rather than corrupting memory silently.
 
-`test_tx_buf_bounds` currently **fails**: `cmd_handle()` writes 78 bytes into
-its 64-byte `tx_buf` when a single packet carries several `CMD_INFO`
-commands. The test reproduces the overrun and is expected to fail until that
-handler bounds-checks its output cursor.
+Each USB OUT packet produces at most one IN packet. The parser rejects a
+command if its operands do not fit the received packet or its response would
+exceed the 64-byte response buffer.
+
+`CMD_INFO` returns the standard 10-byte `DJTAG2\n` response. UART diagnostics
+use the project-specific `CMD_UART_DEBUG` (`0x07`) command instead, returning
+14 bytes of little-endian counters and state; `debug_uart.py` queries it.
 
 JTAG electrical timing (TDI setup before TCK, TDO sample point) is not covered
 here — a host test has no time axis. Verify that on hardware with

@@ -3,8 +3,8 @@
  *
  * Drives the real cmd_handle() through the OUT endpoint callback, exactly as
  * USBD_IRQHandler does, and inspects the bytes written to the IN endpoint.
- * All hardware behaviour (jtag_gpio, uart_bridge) is faked, so this covers
- * command parsing and response buffers only.
+ * All hardware behaviour is faked, so this covers command parsing and
+ * response buffers only.
  */
 #include "fakes.h"
 
@@ -21,6 +21,7 @@ enum {
   CMD_SETSIG = 0x04,
   CMD_GETSIG = 0x05,
   CMD_CLK = 0x06,
+  CMD_UART_DEBUG = 0x07,
 };
 
 #define NO_READ 0x80
@@ -58,8 +59,19 @@ static void test_info(void) {
 
   CHECK_EQ(fake_write_count, 1);
   CHECK_EQ(fake_write_ep, 0x82);
-  CHECK_EQ(fake_write_len, 10 + sizeof(struct uart_debug_state));
+  CHECK_EQ(fake_write_len, 10);
   CHECK(memcmp(fake_write_buf, "DJTAG2\n", 7) == 0);
+}
+
+static void test_uart_debug(void) {
+  setup();
+  deliver((const uint8_t[]){CMD_UART_DEBUG, CMD_STOP}, 2);
+
+  CHECK_EQ(fake_write_count, 1);
+  CHECK_EQ(fake_write_len, 14);
+  CHECK_EQ(fake_write_buf[10] | (fake_write_buf[11] << 8) | (fake_write_buf[12] << 16)
+               | (fake_write_buf[13] << 24),
+           115200);
 }
 
 static void test_xfer_read(void) {
@@ -156,6 +168,7 @@ static void test_unknown_stops(void) {
 
 static void run_tests(void) {
   test_info();
+  test_uart_debug();
   test_xfer_read();
   test_xfer_no_read();
   test_xfer_extend();

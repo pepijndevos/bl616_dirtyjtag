@@ -37,6 +37,7 @@ pkgs.mkShell {
     pkgs.git
     pkgs.clang-tools  # provides clang-format for the style check
     pkgs.stdenv.cc    # host gcc for tests/ (AddressSanitizer included)
+    pkgs.blisp        # BL702 ROM bootloader flashing tool for make upload
   ];
 
   hardeningDisable = [ "all" ];
