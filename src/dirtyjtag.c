@@ -48,30 +48,51 @@ static USB_NOCACHE_RAM_SECTION USB_MEM_ALIGNX uint8_t rx_buf[64];
 static USB_NOCACHE_RAM_SECTION USB_MEM_ALIGNX uint8_t tx_buf[64];
 static volatile bool ep_tx_busy;
 
+/* Free space left in tx_buf from `out` onwards. */
+static inline size_t out_avail(const uint8_t *out) {
+  return sizeof(tx_buf) - (size_t)(out - tx_buf);
+}
+
+/* Bytes of the received packet still unread from `cmd` onwards. */
+static inline uint32_t in_avail(const uint8_t *cmd, const uint8_t *end) {
+  return (uint32_t)(end - cmd);
+}
+
 static void cmd_handle(const uint8_t *rxbuf, uint32_t count) {
   const uint8_t *commands = rxbuf;
+  const uint8_t *end = rxbuf + count;
   uint8_t *output_buffer = tx_buf;
 
-  while ((commands < (rxbuf + count)) && (*commands != CMD_STOP)) {
+  while ((commands < end) && (*commands != CMD_STOP)) {
     switch ((*commands) & 0x0F) {
       case CMD_INFO: {
         char info_string[10] = "DJTAG2\n";
-        memcpy(output_buffer, info_string, 10);
-        output_buffer += 10;
-        /* Append debug state (14 bytes) after standard info */
+        /* Standard info string followed by the debug state */
         struct uart_debug_state dbg;
         uart_bridge_get_debug(&dbg);
+
+        size_t needed = sizeof(info_string) + sizeof(dbg);
+        if (out_avail(output_buffer) < needed)
+          goto done;
+
+        memcpy(output_buffer, info_string, sizeof(info_string));
+        output_buffer += sizeof(info_string);
         memcpy(output_buffer, &dbg, sizeof(dbg));
         output_buffer += sizeof(dbg);
         break;
       }
 
       case CMD_FREQ:
+        if (in_avail(commands, end) < 3)
+          goto done;
         jtag_set_frequency((commands[1] << 8) | commands[2]);
         commands += 2;
         break;
 
       case CMD_XFER: {
+        if (in_avail(commands, end) < 2)
+          goto done;
+
         bool no_read = *commands & NO_READ;
         uint16_t transferred_bits = commands[1];
         if (*commands & EXTEND_LENGTH)
@@ -82,9 +103,14 @@ static void cmd_handle(const uint8_t *rxbuf, uint32_t count) {
 
         uint16_t trbytes = (transferred_bits + 7) / 8;
 
-        if (!no_read) {
+        /* Reject a command whose payload was truncated by the endpoint */
+        if (in_avail(commands, end) < (uint32_t)2 + trbytes)
+          goto done;
+        if (!no_read && out_avail(output_buffer) < trbytes)
+          goto done;
+
+        if (!no_read)
           memset(output_buffer, 0, trbytes);
-        }
 
         jtag_transfer(transferred_bits, commands + 2, no_read ? NULL : output_buffer);
 
@@ -94,6 +120,9 @@ static void cmd_handle(const uint8_t *rxbuf, uint32_t count) {
       }
 
       case CMD_SETSIG: {
+        if (in_avail(commands, end) < 3)
+          goto done;
+
         uint8_t signal_mask = commands[1];
         uint8_t signal_status = commands[2];
 
@@ -112,6 +141,9 @@ static void cmd_handle(const uint8_t *rxbuf, uint32_t count) {
       }
 
       case CMD_GETSIG: {
+        if (out_avail(output_buffer) < 1)
+          goto done;
+
         uint8_t signal_status = 0;
         if (jtag_get_tdo())
           signal_status |= SIG_TDO;
@@ -121,9 +153,15 @@ static void cmd_handle(const uint8_t *rxbuf, uint32_t count) {
       }
 
       case CMD_CLK: {
+        if (in_avail(commands, end) < 3)
+          goto done;
+
         bool readout = !!(*commands & READOUT);
         uint8_t signals = commands[1];
         uint8_t clk_pulses = commands[2];
+
+        if (readout && out_avail(output_buffer) < 1)
+          goto done;
 
         bool readout_val = jtag_strobe(clk_pulses, signals & SIG_TMS, signals & SIG_TDI);
         if (readout) {

@@ -95,14 +95,29 @@ static void test_xfer_extend(void) {
 }
 
 /* Length is capped at 62*8 so a request cannot overrun the transfer buffer.
- * Reaching the cap needs EXTEND_LENGTH: 0xFF + 256 = 511 > 496. */
+ * Reaching the cap needs EXTEND_LENGTH: 0xFF + 256 = 511 > 496. The packet is
+ * exactly 64 bytes (cmd + len + 62 payload), so there is no room for STOP. */
 static void test_xfer_capped(void) {
   setup();
+  uint8_t pkt[64] = {0};
+  pkt[0] = CMD_XFER | EXTEND_LENGTH;
+  pkt[1] = 0xFF;
   fake_tdo = 0xFF;
-  deliver((const uint8_t[]){CMD_XFER | EXTEND_LENGTH, 0xFF, CMD_STOP}, 3);
+  deliver(pkt, sizeof(pkt));
 
   CHECK_EQ(fake_bits, 62 * 8);
   CHECK_EQ(fake_write_len, 62);
+}
+
+/* A packet whose XFER payload is truncated must not read past the received
+ * byte count. */
+static void test_xfer_truncated(void) {
+  setup();
+  deliver((const uint8_t[]){CMD_XFER, 0xFF, CMD_STOP}, 3);
+
+  /* Only the length byte arrived; the framing is rejected before any shift */
+  CHECK_EQ(fake_bits, 0);
+  CHECK_EQ(fake_write_count, 0);
 }
 
 static void test_getsig(void) {
@@ -145,6 +160,7 @@ static void run_tests(void) {
   test_xfer_no_read();
   test_xfer_extend();
   test_xfer_capped();
+  test_xfer_truncated();
   test_getsig();
   test_clk_readout();
   test_clk_no_readout();
