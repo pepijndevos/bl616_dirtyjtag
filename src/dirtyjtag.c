@@ -12,9 +12,7 @@
 #include "dirtyjtag.h"
 #include "jtag_gpio.h"
 #include "uart_bridge.h"
-
-#define JTAG_OUT_EP  0x01
-#define JTAG_IN_EP   0x82
+#include "usb_eps.h"
 
 /* DirtyJTAG v2 command IDs */
 enum {

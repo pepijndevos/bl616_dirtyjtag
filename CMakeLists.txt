@@ -8,7 +8,9 @@ set(CONFIG_CHERRYUSB_DEVICE_CDC_ACM 1)
 find_package(bouffalo_sdk REQUIRED HINTS $ENV{BL_SDK_BASE})
 
 sdk_add_include_directories(. src)
+if(NOT CHIP STREQUAL "bl702")
 sdk_add_compile_definitions(-DCONFIG_USB_HS)
+endif()
 
 target_sources(app PRIVATE
     src/usb_descriptors.c

@@ -5,8 +5,9 @@
  * Host can set baud rate via SET_LINE_CODING.
  * UART RX is polled in a FreeRTOS task.
  *
- * Pin assignments (Nano20K):
- *   UART1_TX = GPIO11, UART1_RX = GPIO13
+ * Pin assignments:
+ *   BL616 (Nano20K): UART1_TX = GPIO11, UART1_RX = GPIO13
+ *   BL702 (Nano9K):  UART1_TX = GPIO26, UART1_RX = GPIO27
  */
 #include <string.h>
 #include "usbd_core.h"
@@ -16,10 +17,15 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include "uart_bridge.h"
+#include "usb_eps.h"
 
-#define CDC_INT_EP  0x83
-#define CDC_OUT_EP  0x03
-#define CDC_IN_EP   0x84
+#if defined(BL702)
+#define UART_TX_PIN GPIO_PIN_26  /* Tang Nano 9K: to FPGA_RX */
+#define UART_RX_PIN GPIO_PIN_27  /* Tang Nano 9K: from FPGA_TX */
+#else
+#define UART_TX_PIN GPIO_PIN_11
+#define UART_RX_PIN GPIO_PIN_13
+#endif
 
 static struct bflb_device_s *uart1_dev;
 
@@ -85,8 +91,8 @@ void uart_bridge_uart_init(void)
 {
     struct bflb_device_s *gpio = bflb_device_get_by_name("gpio");
 
-    bflb_gpio_uart_init(gpio, GPIO_PIN_11, GPIO_UART_FUNC_UART1_TX);
-    bflb_gpio_uart_init(gpio, GPIO_PIN_13, GPIO_UART_FUNC_UART1_RX);
+    bflb_gpio_uart_init(gpio, UART_TX_PIN, GPIO_UART_FUNC_UART1_TX);
+    bflb_gpio_uart_init(gpio, UART_RX_PIN, GPIO_UART_FUNC_UART1_RX);
 
     uart1_dev = bflb_device_get_by_name("uart1");
 

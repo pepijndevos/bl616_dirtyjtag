@@ -2,17 +2,11 @@
  * USB Composite Descriptors for DirtyJTAG + CDC-ACM
  *
  * Interface 0: Vendor bulk (DirtyJTAG) — EP 0x01 OUT, EP 0x82 IN
- * Interface 1-2: CDC-ACM (UART bridge) — EP 0x83 IN (int), EP 0x03 OUT, EP 0x84 IN
+ * Interface 1-2: CDC-ACM (UART bridge) — endpoints in usb_eps.h
  */
 #include "usbd_core.h"
 #include "usbd_cdc_acm.h"
-
-/* Endpoint addresses */
-#define JTAG_OUT_EP  0x01
-#define JTAG_IN_EP   0x82
-#define CDC_INT_EP   0x83
-#define CDC_OUT_EP   0x03
-#define CDC_IN_EP    0x84
+#include "usb_eps.h"
 
 #define USBD_VID           0x1209
 #define USBD_PID           0xC0CA

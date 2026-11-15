@@ -19,7 +19,11 @@
 #define CONFIG_USB_ALIGN_SIZE 4
 #endif
 
+#if defined(BL702)
+#define USB_NOCACHE_RAM_SECTION  /* no D-cache; usb_v1 copies through FIFO */
+#else
 #define USB_NOCACHE_RAM_SECTION __attribute__((section(".noncacheable")))
+#endif
 
 /* ================= USB Device Stack Configuration ================ */
 

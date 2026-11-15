@@ -1,5 +1,5 @@
 /*
- * BL616 DirtyJTAG — Main entry point
+ * BL616 / BL702 DirtyJTAG — Main entry point
  *
  * Composite USB device: DirtyJTAG v2 (vendor bulk) + CDC-ACM (UART bridge)
  */
@@ -12,6 +12,12 @@
 #include "dirtyjtag.h"
 #include "jtag_gpio.h"
 #include "uart_bridge.h"
+
+#if defined(BL702)
+#define USBD_REG_BASE 0x4000D800  /* bflb_usb_v1.c ignores this and hardcodes it */
+#else
+#define USBD_REG_BASE 0x20072000
+#endif
 
 /* Provided by usb_descriptors.c */
 extern void usb_descriptors_init(uint8_t busid);
@@ -40,7 +46,7 @@ int main(void)
     usb_descriptors_init(0);
     dirtyjtag_init(0);
     uart_bridge_usb_init(0);
-    usbd_initialize(0, 0x20072000, usbd_event_handler);
+    usbd_initialize(0, USBD_REG_BASE, usbd_event_handler);
 
     /* Init GPIO for JTAG */
     jtag_gpio_init();

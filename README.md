@@ -81,6 +81,38 @@ To flash:
 make flash CHIP=bl616 COMX=/dev/ttyACM0
 ```
 
+## Tang Nano 9K (BL702) target
+
+The same firmware also builds for the **Tang Nano 9K**'s onboard BL702 (same USB identity, DirtyJTAG v2 + CDC-ACM). The BL702 has no secure boot, so the image (with its normal bootheader) goes straight to flash 0x0 — no partner firmware, no boot2.
+
+| Function | GPIO |
+|----------|------|
+| JTAG TMS | GPIO14 |
+| JTAG TCK | GPIO23 |
+| JTAG TDI | GPIO17 |
+| JTAG TDO | GPIO15 |
+| UART1 TX (to FPGA_RX) | GPIO26 |
+| UART1 RX (from FPGA_TX) | GPIO27 |
+
+USB is full-speed on the BL702; the CDC endpoints are 0x83/0x04/0x85 because BL702 endpoints are unidirectional (BL616 keeps 0x83/0x03/0x84).
+
+Build (output in `build_bl702/`):
+
+```bash
+export PATH=$(pwd)/bouffalo_sdk/tools/toolchain_gcc_t-head_linux/bin:$PATH
+make CHIP=bl702 BOARD=bl702dk
+```
+
+Flash: hold **Boot_Strap (GPIO28) high** while plugging in USB to enter the BL702 ROM download mode, then:
+
+```bash
+bouffalo_sdk/tools/bflb_tools/bouffalo_flash_cube/BLFlashCommand-ubuntu \
+    --interface=uart --baudrate=2000000 --port=/dev/ttyACM0 \
+    --chipname=bl702 --config=flash_prog_cfg_bl702.ini
+```
+
+This overwrites Sipeed's FT2232-emulation firmware at 0x0. Use `-b tangnano9k` with openFPGALoader.
+
 ## Boot sequence
 
 The Tang Nano 20K's BL616 has **eFuse secure boot** enabled by Sipeed at the factory. This means:
@@ -132,10 +164,12 @@ The baud rate is configurable via the standard CDC SET_LINE_CODING request (most
 ├── CMakeLists.txt        # Project config (FreeRTOS + CherryUSB)
 ├── FreeRTOSConfig.h      # FreeRTOS configuration
 ├── usb_config.h          # CherryUSB device configuration
-├── flash_prog_cfg.ini    # Flash programming layout
+├── flash_prog_cfg.ini    # Flash programming layout (BL616)
+├── flash_prog_cfg_bl702.ini # Flash programming layout (BL702, 0x0 only)
 └── src/
     ├── main.c            # Entry point, USB + FreeRTOS init
     ├── usb_descriptors.c # Composite USB descriptors
+    ├── usb_eps.h         # USB endpoint numbers (per chip)
     ├── dirtyjtag.c/h     # DirtyJTAG v2 protocol handler
     ├── jtag_gpio.c/h     # GPIO bit-bang JTAG engine
     └── uart_bridge.c/h   # CDC-ACM to UART1 bridge
