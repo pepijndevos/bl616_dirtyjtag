@@ -3,7 +3,9 @@
  *
  * Pin assignments:
  *   BL616 (Tang Nano 20K): TMS = GPIO16, TCK = GPIO10, TDI = GPIO12, TDO = GPIO14
- *   BL702 (Tang Nano 9K):  TMS = GPIO14, TCK = GPIO23, TDI = GPIO17, TDO = GPIO15
+ *   BL702 (Tang Nano 9K):  TMS = GPIO2,  TCK = GPIO15, TDI = GPIO0,  TDO = GPIO1
+ *     (from Sipeed's stock 9K firmware; the RV-Debugger-BL702 9K pin map is wrong
+ *      for this board)
  *
  * Uses direct register access for inner-loop performance.
  * Reference: firmware-bl616/fpga/programmer.cpp
@@ -13,10 +15,10 @@
 
 #if defined(BL702)
 
-#define PIN_TMS GPIO_PIN_14
-#define PIN_TCK GPIO_PIN_23
-#define PIN_TDI GPIO_PIN_17
-#define PIN_TDO GPIO_PIN_15
+#define PIN_TMS GPIO_PIN_2
+#define PIN_TCK GPIO_PIN_15
+#define PIN_TDI GPIO_PIN_0
+#define PIN_TDO GPIO_PIN_1
 
 /* GLB_GPIO_CFGCTL30 (input) / GLB_GPIO_CFGCTL32 (output): one bit per pin */
 #define GPIO_IN  (*(volatile uint32_t *)0x40000180)

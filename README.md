@@ -87,10 +87,10 @@ The same firmware also builds for the **Tang Nano 9K**'s onboard BL702 (same USB
 
 | Function | GPIO |
 |----------|------|
-| JTAG TMS | GPIO14 |
-| JTAG TCK | GPIO23 |
-| JTAG TDI | GPIO17 |
-| JTAG TDO | GPIO15 |
+| JTAG TMS | GPIO2  |
+| JTAG TCK | GPIO15 |
+| JTAG TDI | GPIO0  |
+| JTAG TDO | GPIO1  |
 | UART1 TX (to FPGA_RX) | GPIO26 |
 | UART1 RX (from FPGA_TX) | GPIO27 |
 
