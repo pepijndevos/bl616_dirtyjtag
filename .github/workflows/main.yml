@@ -15,14 +15,31 @@ jobs:
     steps:
     - uses: actions/checkout@v6
 
-    - name: Run clang-format style check
+    - name: Run clang-format style check (src)
       uses: jidicula/clang-format-action@v4.18.0
       with:
         clang-format-version: '21'
         check-path: 'src'
 
+    - name: Run clang-format style check (tests)
+      uses: jidicula/clang-format-action@v4.18.0
+      with:
+        clang-format-version: '21'
+        check-path: 'tests'
+
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        submodules: true
+
+    - name: Build and run host regression tests
+      run: make test
+
   build:
-    needs: format
+    needs: [format, test]
     runs-on: ubuntu-latest
 
     steps:

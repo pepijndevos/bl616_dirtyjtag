@@ -77,6 +77,28 @@ The firmware binary is written to:
 build/build_out/dirtyjtag_tangprimer20k_bl702.bin
 ```
 
+## Testing
+
+Host-side regression tests run on a PC — no board, no cross-toolchain:
+
+```bash
+make test
+```
+
+They compile the real `src/` sources against small fakes (`tests/`) and cover
+the DirtyJTAG command parser, its response buffers, and the USB descriptor
+tables. The build uses AddressSanitizer, so buffer overruns in the firmware
+fail the run rather than corrupting memory silently.
+
+`test_tx_buf_bounds` currently **fails**: `cmd_handle()` writes 78 bytes into
+its 64-byte `tx_buf` when a single packet carries several `CMD_INFO`
+commands. The test reproduces the overrun and is expected to fail until that
+handler bounds-checks its output cursor.
+
+JTAG electrical timing (TDI setup before TCK, TDO sample point) is not covered
+here — a host test has no time axis. Verify that on hardware with
+`openFPGALoader -c dirtyJtag --detect` followed by an SRAM write.
+
 ## Flashing
 
 The BL702 on the Tang Primer 20K Dock does **not** have secure boot enabled, so the firmware can be flashed as a single image at address `0x0` using [blisp](https://github.com/pine64/blisp):

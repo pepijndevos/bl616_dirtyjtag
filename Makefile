@@ -15,3 +15,16 @@ include $(BL_SDK_BASE)/project.build
 # payload at flash 0x2000, which maps to XIP 0x23000000.
 upload: $(BUILD_DIR)
 	blisp write -c bl70x -p $(PORT) --reset build/build_out/dirtyjtag_tangprimer20k_bl702.bin
+
+# Host-side regression tests (no hardware, no cross-toolchain).
+TEST_BUILD_DIR := build/tests
+
+.PHONY: test
+test:
+	cmake -B $(TEST_BUILD_DIR) -S tests
+	cmake --build $(TEST_BUILD_DIR)
+	ctest --test-dir $(TEST_BUILD_DIR) --output-on-failure
+
+.PHONY: test-clean
+test-clean:
+	rm -rf $(TEST_BUILD_DIR)

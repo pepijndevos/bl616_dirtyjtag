@@ -3,6 +3,9 @@
 # Provides the Xuantie/T-Head RISC-V bare-metal cross-toolchain (the patched
 # GCC 10.2.0 that bouffalo_sdk requires, with CLIC/mtvt CSR support) plus
 # cmake/make/git.
+#
+# The host toolchain (pkgs.stdenv.cc) is for the PC-side regression tests in
+# tests/, which build against fakes rather than the RISC-V SDK.
 { pkgs ? import <nixpkgs> {} }:
 
 let
@@ -33,6 +36,7 @@ pkgs.mkShell {
     pkgs.gnumake
     pkgs.git
     pkgs.clang-tools  # provides clang-format for the style check
+    pkgs.stdenv.cc    # host gcc for tests/ (AddressSanitizer included)
   ];
 
   hardeningDisable = [ "all" ];
