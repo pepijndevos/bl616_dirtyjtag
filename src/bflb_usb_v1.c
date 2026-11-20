@@ -1,7 +1,9 @@
 #include "bflb_core.h"
 #include "bflb_gpio.h"
+#include "bflb_mtimer.h"
 #include "usbd_core.h"
 #include "hardware/usb_v1_reg.h"
+#include "usb_dc_debug.h"
 
 #define BL702_USB_BASE ((uint32_t)0x4000D800)
 #define BL702_GLB_BASE ((uint32_t)0x40000000)
@@ -70,6 +72,13 @@ struct bl_udc {
     struct bl_ep_state in_ep[USB_NUM_BIDIR_ENDPOINTS];  /*!< IN endpoint parameters             */
     struct bl_ep_state out_ep[USB_NUM_BIDIR_ENDPOINTS]; /*!< OUT endpoint parameters            */
 } g_bl_udc;
+
+static struct usb_dc_debug g_usb_dc_debug;
+
+void usb_dc_get_debug(struct usb_dc_debug *dbg)
+{
+    *dbg = g_usb_dc_debug;
+}
 
 void USBD_IRQHandler(uint8_t busid);
 
@@ -485,6 +494,60 @@ int usbd_ep_start_read(uint8_t busid, const uint8_t ep, uint8_t *data, uint32_t 
     return 0;
 }
 
+/*
+ * Longest the ISR may wait for EP0 RDY to drop.  A full-speed EP0
+ * transaction (at most 64 data bytes plus token and handshake) is under
+ * 60 us on the wire, so RDY that is still held after a whole 1 ms frame
+ * will not drop by itself: typically EP0 is still armed for a data or
+ * status stage of a control transfer the host has given up on.  The
+ * unbounded wait this replaces kept the CPU in the ISR forever in that
+ * case, which is what a wedged device that answers no control requests
+ * looks like.
+ */
+#define EP0_RDY_TIMEOUT_US 1000
+
+/* Wait for EP0 RDY to drop; false on timeout. */
+static bool bflb_usb_ep0_wait_idle(void)
+{
+    uint64_t start = bflb_mtimer_get_time_us();
+    uint32_t waited;
+    bool idle;
+
+    do {
+        idle = !bflb_usb_ep_isbusy(0);
+        waited = (uint32_t)(bflb_mtimer_get_time_us() - start);
+    } while (!idle && waited < EP0_RDY_TIMEOUT_US);
+
+    if (waited > g_usb_dc_debug.ep0_wait_max_us) {
+        g_usb_dc_debug.ep0_wait_max_us = waited;
+    }
+    return idle;
+}
+
+/*
+ * Give up on the current control transfer: drop whatever is in the EP0
+ * FIFOs (a half-read SETUP or OUT packet, stale IN data that would
+ * otherwise be sent ahead of the next reply) and STALL EP0.  The host sees
+ * the transfer fail and retries with a new SETUP, which devices must
+ * always accept; handling that SETUP re-arms EP0 through
+ * bflb_usb_ep_set_ready(), which also clears the STALL.  Reading the FIFO
+ * while the controller still owns it would hand garbage to the USB core.
+ * The FIFO clear bits are pulsed (set, then cleared) because it is not
+ * documented whether they clear themselves.
+ */
+static void bflb_usb_ep0_abort(void)
+{
+    uint32_t regval;
+
+    regval = getreg32(BL702_USB_BASE + USB_EP0_FIFO_CONFIG_OFFSET);
+    putreg32(regval | USB_EP0_TX_FIFO_CLR | USB_EP0_RX_FIFO_CLR,
+             BL702_USB_BASE + USB_EP0_FIFO_CONFIG_OFFSET);
+    putreg32(regval & ~(USB_EP0_TX_FIFO_CLR | USB_EP0_RX_FIFO_CLR),
+             BL702_USB_BASE + USB_EP0_FIFO_CONFIG_OFFSET);
+
+    usbd_ep_set_stall(0, 0x80);
+}
+
 void USBD_IRQHandler(uint8_t busid)
 {
     uint32_t regval;
@@ -492,6 +555,7 @@ void USBD_IRQHandler(uint8_t busid)
     uint16_t rx_count;
     uint16_t tx_count;
 
+    g_usb_dc_debug.isr_count++;
     intstatus = bflb_usb_get_intstatus();
 
     /*
@@ -511,6 +575,7 @@ void USBD_IRQHandler(uint8_t busid)
     for (uint8_t ep_idx = 1; ep_idx < USB_NUM_BIDIR_ENDPOINTS; ep_idx++) {
         if ((intstatus & (1 << (9 + 2 * ep_idx))) && bflb_usb_ep_isbusy(ep_idx)) {
             intstatus &= ~(1 << (9 + 2 * ep_idx));
+            g_usb_dc_debug.ep_done_deferred++;
         }
     }
     bflb_usb_int_clear(intstatus);
@@ -549,16 +614,21 @@ void USBD_IRQHandler(uint8_t busid)
     }
 
     if (intstatus & USB_EP0_SETUP_DONE_INT) {
-        while (bflb_usb_ep_isbusy(0)) {
+        /*
+         * A bad SETUP used to print and return here, which dropped the
+         * other events of this interrupt (already cleared above) and left
+         * EP0 unarmed.  Abort the control transfer instead and carry on.
+         */
+        if (!bflb_usb_ep0_wait_idle()) {
+            g_usb_dc_debug.ep0_setup_wait_timeouts++;
+            bflb_usb_ep0_abort();
+        } else if ((rx_count = bflb_usb_get_rxcount(0)) != 8) {
+            g_usb_dc_debug.ep0_setup_bad_len++;
+            bflb_usb_ep0_abort();
+        } else {
+            bflb_usb_fifo2mem(0, (uint8_t *)&g_bl_udc.setup, 8);
+            usbd_event_ep0_setup_complete_handler(busid, (uint8_t *)&g_bl_udc.setup);
         }
-
-        rx_count = bflb_usb_get_rxcount(0);
-        if (rx_count != 8) {
-            printf("setup fail\r\n");
-            return;
-        }
-        bflb_usb_fifo2mem(0, (uint8_t *)&g_bl_udc.setup, 8);
-        usbd_event_ep0_setup_complete_handler(busid, (uint8_t *)&g_bl_udc.setup);
     }
     if (intstatus & USB_EP0_IN_DONE_INT) {
         tx_count = MIN(g_bl_udc.in_ep[0].xfer_len, g_bl_udc.in_ep[0].ep_mps);
@@ -577,21 +647,23 @@ void USBD_IRQHandler(uint8_t busid)
         }
     }
     if (intstatus & USB_EP0_OUT_DONE_INT) {
-        while (bflb_usb_ep_isbusy(0)) {
-        }
+        if (!bflb_usb_ep0_wait_idle()) {
+            g_usb_dc_debug.ep0_out_wait_timeouts++;
+            bflb_usb_ep0_abort();
+        } else {
+            rx_count = bflb_usb_get_rxcount(0);
 
-        rx_count = bflb_usb_get_rxcount(0);
+            bflb_usb_fifo2mem(0, g_bl_udc.out_ep[0].xfer_buf, rx_count);
+            g_bl_udc.out_ep[0].xfer_buf += rx_count;
+            g_bl_udc.out_ep[0].xfer_len -= rx_count;
+            g_bl_udc.out_ep[0].actual_xfer_len += rx_count;
 
-        bflb_usb_fifo2mem(0, g_bl_udc.out_ep[0].xfer_buf, rx_count);
-        g_bl_udc.out_ep[0].xfer_buf += rx_count;
-        g_bl_udc.out_ep[0].xfer_len -= rx_count;
-        g_bl_udc.out_ep[0].actual_xfer_len += rx_count;
+            usbd_event_ep_out_complete_handler(busid, 0, g_bl_udc.out_ep[0].actual_xfer_len);
 
-        usbd_event_ep_out_complete_handler(busid, 0, g_bl_udc.out_ep[0].actual_xfer_len);
-
-        if (rx_count == 0) {
-            /* Out status, start reading setup */
-            bflb_usb_ep_set_ready(0);
+            if (rx_count == 0) {
+                /* Out status, start reading setup */
+                bflb_usb_ep_set_ready(0);
+            }
         }
     }
 
