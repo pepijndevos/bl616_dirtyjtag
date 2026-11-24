@@ -46,6 +46,16 @@ while True:
         print(f"  CDC configured (DTR): {configured}")
         print(f"  CDC TX busy: {busy}")
         print(f"  Baudrate: {baudrate}")
+        if len(data) >= 50:
+            # BL702 only: struct usb_dc_debug (src/usb_dc_debug.h), six uint32
+            (isr, setup_to, out_to, setup_bad,
+             wait_max, deferred) = struct.unpack_from('<6I', data, 26)
+            print(f"  USB ISR count: {isr}")
+            print(f"  EP0 SETUP wait timeouts: {setup_to}")
+            print(f"  EP0 OUT wait timeouts: {out_to}")
+            print(f"  EP0 bad SETUP length: {setup_bad}")
+            print(f"  EP0 longest RDY wait: {wait_max} us")
+            print(f"  EP DONE deferred (RDY held): {deferred}")
     else:
         print(f"  No debug data (response {len(data)} bytes)")
 
